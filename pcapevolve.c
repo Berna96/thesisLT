@@ -38,6 +38,7 @@ struct args_loop{
 	struct bpf_program* bf_src_port;
 	struct bpf_program* bf_dst_port;
 	struct bpf_program bf_src_myip;
+	struct bpf_program bf_dst_myip;
 	pcap_dumper_t** fileport;
 	pcap_dumper_t* fileotherport;
 };
@@ -92,6 +93,7 @@ pcap_dumper_t* fileotherport;
 struct bpf_program* bf_src_port;
 struct bpf_program* bf_dst_port;
 struct bpf_program bf_src_myip;
+struct bpf_program bf_dst_myip;
 struct bpf_program bf_tcp;
 struct args_loop* args;
 char* pidstr;
@@ -159,11 +161,10 @@ device_name=my_device->name;
 
 if (pcap_lookupnet(device_name,&net,&mask,errbuf)==-1)	pcap_fatal("pcap_lookupnet",errbuf);
 printf("Sniffing on %s\n", device_name);
-
 pcap_handle = pcap_open_live(device_name,MAX_DIM,promisc,timeout,errbuf);
 if(pcap_handle==NULL)	pcap_fatal("pcap_open_live",errbuf);
-
-pcap_setdirection(pcap_handle, PCAP_D_INOUT);
+//if(pcap_set_promisc(pcap_handle,0)==PCAP_ERROR_ACTIVATED)	pcap_fatal("pcap_set_promisc",errbuf);
+//pcap_setdirection(pcap_handle, PCAP_D_INOUT);
 
 int datalink=pcap_datalink(pcap_handle);			
 if((datalink!=DLT_EN10MB)/* || (datalink!=DLT_IEE802_11) || (datalink!=DLT_FFDI) || (datalink!=DLT_PPP_ETHER) || (datalink!=DLT_NULL) || (datalink!=DLT_PPP)*/){
@@ -181,6 +182,9 @@ initilize_filter_port(ports, "dst", bf_dst_port);
 char ip_expr[100];
 char my_ip[INET_ADDRSTRLEN];
 char my_ipv6[INET6_ADDRSTRLEN];
+char hostname[1024];
+hostname[1023]='\0';
+gethostname(hostname, 1023);
 
 for(pcap_addr_t *a=my_device->addresses; a!=NULL; a=a->next){
 	if (a->addr->sa_family == AF_INET){
@@ -191,15 +195,20 @@ for(pcap_addr_t *a=my_device->addresses; a!=NULL; a=a->next){
 		if (my_ipv6==NULL){ printf("%s\n", "No ipv6"); return 1;}
 	}
 } 
-//strcpy(my_ip, "192.168.1.90");
+printf("My host name: %s\n", hostname);
 printf("My ipv4: %s\n",my_ip);
 printf("My ipv6: %s\n",my_ipv6);
-sprintf(ip_expr, "ip src host %s or ip6 src host %s", my_ip, my_ipv6);
-char tcp_expr[20];
-strcpy(tcp_expr, "tcp"); 
+char tcp_expr[50];
+//sprintf(tcp_expr, "tcp and host %s", hostname);
+sprintf(tcp_expr, "tcp");
+//sprintf(ip_expr, "src host %s", hostname);
+sprintf(ip_expr, "ip src host %s", my_ip);
 if (pcap_compile(pcap_handle,&bf_tcp, tcp_expr,0,net)==-1)	pcap_fatal("pcap_compile",errbuf);	
 if (pcap_setfilter(pcap_handle,&bf_tcp)==-1)	pcap_fatal("pcap_setfilter",errbuf);	
 if (pcap_compile(pcap_handle,&bf_src_myip,ip_expr,0,net)==-1)	pcap_fatal("pcap_compile",errbuf);
+memset(ip_expr,0,50);
+sprintf(ip_expr, "ip dst host %s", my_ip);
+if (pcap_compile(pcap_handle,&bf_dst_myip,ip_expr,0,net)==-1)	pcap_fatal("pcap_compile",errbuf);
 
 fileport=(pcap_dumper_t**)malloc(sizeof(pcap_dumper_t*)*num_ports);
 fileportp=&fileport;
@@ -212,6 +221,7 @@ args->ports=ports;
 args->bf_src_port=bf_src_port;
 args->bf_dst_port=bf_dst_port;
 args->bf_src_myip=bf_src_myip;
+args->bf_dst_myip=bf_dst_myip;
 args->fileport=fileport;
 args->fileotherport=fileotherport;
 args->callback_port_transmit=handle_transmit_packet_port;
@@ -267,15 +277,16 @@ void handle_child(int signum){
 }
 
 void initilize_filter_port(ports_info* ports, const char* str, struct bpf_program* bf ){
-	char filter_expr[20];
+	char init_expr[10];
+	char filter_expr[30];
+	if (strcmp(str,"src")==0){
+		strcpy(init_expr,"src port");
+	}else{
+		strcpy(init_expr,"dst port");
+	}
 	for (int i=0; i<ports->num_ports;i++){
 		memset(filter_expr,0,20);
-		if (strcmp(str,"src")==0){
-			strcpy(filter_expr,"src port ");
-		}else{
-			strcpy(filter_expr,"dst port ");
-		}
-		strcat(filter_expr, *(ports->port+i));
+		sprintf(filter_expr, "%s %s", init_expr, *(ports->port+i));
 		if (pcap_compile(pcap_handle,bf+i,filter_expr,0,net)==-1)   pcap_fatal("pcap_compile",errbuf);
 	}
 }
@@ -298,6 +309,8 @@ void apply_filter(u_char *arguments, const struct pcap_pkthdr *header, const u_c
 	ports_info* ports=args->ports;
 	int other_port_flag=1;
 	if (pcap_offline_filter(&(args->bf_src_myip),header,packet)){
+		//args->callback_port_transmit(packet,header,"8000", *(args->fileport));
+		//other_port_flag=0;
 		for(int i=0; i<ports->num_ports; i++){
 			if (pcap_offline_filter(args->bf_src_port+i,header,packet)){
 				args->callback_port_transmit(packet,header,*(ports->port+i), *(args->fileport+i));
@@ -306,15 +319,17 @@ void apply_filter(u_char *arguments, const struct pcap_pkthdr *header, const u_c
 			}	
 		}
 			
-	}else{
-		
-		for(int i=0; i<ports->num_ports; i++){
+	}else if(pcap_offline_filter(&(args->bf_dst_myip),header,packet)){
+		args->callback_port_receive(packet,header,"8000", *(args->fileport));
+		other_port_flag=0;
+		/*for(int i=0; i<ports->num_ports; i++){
 			if (pcap_offline_filter(args->bf_dst_port+i,header,packet))
 				args->callback_port_receive(packet,header,*(ports->port+i), *(args->fileport+i));
 				other_port_flag=0;
 				break;	
-		}
+		}*/
 	}
+	/**/
 	if (other_port_flag)	args->callback_other_port(packet, header, args->fileotherport);
 	
 }
