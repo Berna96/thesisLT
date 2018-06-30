@@ -14,8 +14,13 @@ sendfile(){
 		echo "Transfering file successfully"
 		echo "Finished"
 	else
-		echo "Error sending files: Exiting"
-		exit 2
+		echo "Error sending files: zipping file"
+		gzip -d file_da_zippare
+		if [ "$?" -ne 0 ]; then
+			echo "Failed to zip file, pcap lost"
+		else
+			echo "File pcap zipped: you can retreive it later"
+		fi
 	fi
 }
 
