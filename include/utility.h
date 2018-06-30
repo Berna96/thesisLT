@@ -51,7 +51,7 @@ int c_length(char* buffer){
 }
 
 void usage(char *name){
-	printf("Usage: %s username@host:dest\n", name);
+	printf("Usage: %s pid\n", name);
 	exit(1);
 }
 

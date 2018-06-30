@@ -1,4 +1,5 @@
 #include "utility.h"
+
 typedef struct ports_infos{
 	int num_ports;
 	char** port;
@@ -16,7 +17,7 @@ ports_info* scan_file(FILE* file){
 	ports=(ports_info *)ec_malloc(sizeof(ports_info));
        
 	while(!feof(file)){
-                if (fgets(buffer_tmp,100,file)==NULL)       break;
+                if (fgets(buffer_tmp,100,file)==NULL)	break;
 		len_buf=len_buf+strlen(buffer_tmp);	
         }
 				//ATTENZIONE: il buffer contiene come ultimo carattere \n e quindi la 
@@ -30,7 +31,8 @@ ports_info* scan_file(FILE* file){
         }
 
 	*(buffer+len_buf-1)='\0';
-	len_buf--;
+	strcat(buffer, ";");
+	//len_buf--;
 	//calcolo del numero di porte
         for(int i=0; i<len_buf;i++){
                 if(buffer[i]==';')      ports->num_ports++;
@@ -64,6 +66,6 @@ ports_info* scan_file(FILE* file){
 			int_index=0;	
                 }      
         }
-
+	
 	return ports;
 }
