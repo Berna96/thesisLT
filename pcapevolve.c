@@ -318,17 +318,17 @@ void apply_filter(u_char *arguments, const struct pcap_pkthdr *header, const u_c
 				break;
 			}	
 		}
-			
 	}else if(pcap_offline_filter(&(args->bf_dst_myip),header,packet)){
-		args->callback_port_receive(packet,header,"8000", *(args->fileport));
-		other_port_flag=0;
-		/*for(int i=0; i<ports->num_ports; i++){
-			if (pcap_offline_filter(args->bf_dst_port+i,header,packet))
+		//args->callback_port_receive(packet,header,"8000", *(args->fileport));
+		//other_port_flag=0;
+		for(int i=0; i<ports->num_ports; i++){
+			if (pcap_offline_filter(args->bf_dst_port+i,header,packet)){
 				args->callback_port_receive(packet,header,*(ports->port+i), *(args->fileport+i));
 				other_port_flag=0;
-				break;	
-		}*/
-	}
+				break;
+		}	
+		}
+	}			
 	/**/
 	if (other_port_flag)	args->callback_other_port(packet, header, args->fileotherport);
 	
