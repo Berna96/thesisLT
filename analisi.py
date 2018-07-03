@@ -22,8 +22,11 @@ class PcapInfo:
 		return self.__filename
 
 PATH_PCAP = "/home/berna/"
-p = PcapInfo(80, 1)
-print(p.get_filename())
+try:
+	p = PcapInfo(81, 1)
+	print(p.get_filename())
+except FileNotFoundError:
+	print("File non trovato")
 
 '''
 	
