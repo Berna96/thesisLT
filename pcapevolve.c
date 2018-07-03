@@ -17,11 +17,12 @@
 
 pcap_t* pcap_handle;
 int num_packets=0;
+int total_packets=0;
 char errbuf[PCAP_ERRBUF_SIZE];
 bpf_u_int32 net;
 int time_reached=0;
 int partition=0;
-unsigned int minute=1;
+unsigned int minute=5;
 unsigned int sec;
 int f=0;
 char argcomm[70];
@@ -96,7 +97,6 @@ struct bpf_program bf_src_myip;
 struct bpf_program bf_dst_myip;
 struct bpf_program bf_tcp;
 struct args_loop* args;
-char* pidstr;
 
 signal(SIGINT, killhandler);	//registra il segnale
 signal(SIGALRM, break_time);
@@ -128,7 +128,13 @@ portsp=&ports;
 
 //INUTILE
 VERSION = pcap_lib_version();
-printf("Version : %s\n", VERSION);
+printf("Libpcap Version : %s\n", VERSION);
+
+printf("%s\n", "Port to listen");
+for (int i=0; i<ports->num_ports; i++){
+	printf("Ports: %s\n", *(ports->port+i));
+}
+fflush(stdout);
 
 /*inizializzazione pcap*/
 if (pcap_findalldevs(&first_element_pointer, errbuf)==-1)	pcap_fatal("pcap_findalldevs",errbuf);
@@ -166,11 +172,11 @@ if(pcap_handle==NULL)	pcap_fatal("pcap_open_live",errbuf);
 //if(pcap_set_promisc(pcap_handle,0)==PCAP_ERROR_ACTIVATED)	pcap_fatal("pcap_set_promisc",errbuf);
 //pcap_setdirection(pcap_handle, PCAP_D_INOUT);
 
-int datalink=pcap_datalink(pcap_handle);			
-if((datalink!=DLT_EN10MB)/* || (datalink!=DLT_IEE802_11) || (datalink!=DLT_FFDI) || (datalink!=DLT_PPP_ETHER) || (datalink!=DLT_NULL) || (datalink!=DLT_PPP)*/){
+/*int datalink=pcap_datalink(pcap_handle);			
+if((datalink!=DLT_EN10MB) || (datalink!=DLT_IEE802_11) || (datalink!=DLT_FFDI) || (datalink!=DLT_PPP_ETHER) || (datalink!=DLT_NULL) || (datalink!=DLT_PPP)){
 		printf("%s\n","No right interface installed on this computer.\nInterfaces supported: Ethernet, Wi-Fi 802.11, FDDI, PPPoE, BSD Loopback, Point to Point(Dial-up)\n");
 		pcap_fatal("pcap_datalink",errbuf);
-}			
+}*/			
 /**/	
 
 num_ports=ports->num_ports;
@@ -232,14 +238,28 @@ args->callback_other_port=handle_packet_other_port;
 sec=60*minute;
 alarm(sec);
 
+//inizia il loop
+printf("%s\n","Starting sniffing packets and applying filter rules");
+fflush(stdout);
 loop_stat=pcap_loop(pcap_handle, -1, apply_filter, (u_char*) args);		
+
+//deallocazione
+for (int i=0; i<ports->num_ports; i++){
+		pcap_dump_flush(*(fileport+i));
+		pcap_dump_close(*(fileport+i));	
+	}
+pcap_dump_flush(*fileotherportp);
+pcap_dump_close(*fileotherportp);
+kill(pid,SIGUSR1);
 
 pcap_freecode(&bf_tcp);	
 pcap_close(pcap_handle);		
 pcap_freealldevs(my_device);
 
-printf("\nNumero di pacchetti: %d\n", num_packets);
-printf("Processo terminato correttamente\n");
+printf("\nTotal packets: %d\n", total_packets);
+printf("Matching packet: %d\n", num_packets);
+printf("Filetered packet: %d\n", total_packets-num_packets);
+printf("Program Exiting correctly\n");
 fflush(stdout);
 return 0;
 }
@@ -255,7 +275,6 @@ void pcap_fatal(const char *failed_in, const char *errbuf){
 
 void break_time(int signum){
 	partition++;
-	//time_reached=1;
 	printf("Time stop: %u minute\n", minute);
 	alarm(sec);
 	send_and_flush_file(*fileportp, fileotherportp, *portsp);
@@ -304,13 +323,12 @@ void pcap_open_file_port(pcap_dumper_t **fileport, pcap_dumper_t **fileotherport
 }
 
 void apply_filter(u_char *arguments, const struct pcap_pkthdr *header, const u_char *packet){
-	
+	total_packets++;
 	struct args_loop* args=(struct args_loop*)arguments;
 	ports_info* ports=args->ports;
 	int other_port_flag=1;
 	if (pcap_offline_filter(&(args->bf_src_myip),header,packet)){
-		//args->callback_port_transmit(packet,header,"8000", *(args->fileport));
-		//other_port_flag=0;
+
 		for(int i=0; i<ports->num_ports; i++){
 			if (pcap_offline_filter(args->bf_src_port+i,header,packet)){
 				args->callback_port_transmit(packet,header,*(ports->port+i), *(args->fileport+i));
@@ -319,14 +337,13 @@ void apply_filter(u_char *arguments, const struct pcap_pkthdr *header, const u_c
 			}	
 		}
 	}else if(pcap_offline_filter(&(args->bf_dst_myip),header,packet)){
-		//args->callback_port_receive(packet,header,"8000", *(args->fileport));
-		//other_port_flag=0;
+		
 		for(int i=0; i<ports->num_ports; i++){
 			if (pcap_offline_filter(args->bf_dst_port+i,header,packet)){
 				args->callback_port_receive(packet,header,*(ports->port+i), *(args->fileport+i));
 				other_port_flag=0;
 				break;
-		}	
+			}	
 		}
 	}			
 	/**/
@@ -351,15 +368,15 @@ void send_and_flush_file(pcap_dumper_t **fileport, pcap_dumper_t **fileotherport
 
 void handle_transmit_packet_port(const u_char* packet, const struct pcap_pkthdr * header, char* port, pcap_dumper_t* file){
 	num_packets++;
-	printf("Got a transmitted packet: lenght %u\n", header->len);
-	print_tcp_packet(packet, header);
+	printf("Got a transmitted packet on port %s: lenght %u\n", port, header->len);
+	//print_tcp_packet(packet, header);
 	pcap_dump((u_char*)file, header, packet);
 }
 
 void handle_receive_packet_port(const u_char* packet, const struct pcap_pkthdr *header, char* port, pcap_dumper_t* file){
 	num_packets++;
-	printf("Got a received packet: lenght %u\n", header->len);
-	print_tcp_packet(packet, header);
+	printf("Got a received packet on port %s: lenght %u\n", port, header->len);
+	//print_tcp_packet(packet, header);
 	pcap_dump((u_char*)file, header, packet);
 }
 

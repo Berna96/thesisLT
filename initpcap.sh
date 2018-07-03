@@ -12,10 +12,12 @@ sendfile(){
 	#rsync pcapfiles/$MOD/*.pcap $HOSTDEST/pcapfiles/partition$PART/
 	if [ "$?" -eq 0 ]; then
 		echo "Transfering file successfully"
-		echo "Finished"
 	else
-		echo "Error sending files: Exiting"
-		exit 2
+		echo "Error sending files: Compress"
+		tar -czvf partition$PART.tar.gz pcapfiles/$MOD/ 
+		if [ "$?" -ne 0 ]; then
+			echo "Failed to compress file: Recover pcapfiles/$MOD/ manually before time expires"
+		fi
 	fi
 }
 
@@ -55,9 +57,10 @@ echo "When asking, don't insert nothing and press Enter" && \
 echo "" | ssh-keygen && \
 ssh-copy-id  $HOST && \
 echo "Copying test file.." && \
-rsync pcapfiles/.test/testfile.txt $HOSTDEST && \
+rsync portlist.conf  $HOSTDEST/pcapfiles/ && \
+#-a --rsync-path="""mkdir -p $HOMEDEST/pcapfiles/ && rsync"
 sudo ./pcapevolve $PID &
-
+#echo "$?"
 if [ "$?" -ne 0 ]; then
 	echo "Something failed... Exiting"
 	exit 3
