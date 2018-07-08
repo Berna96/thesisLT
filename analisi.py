@@ -3,120 +3,164 @@ import os
 import signal as sig
 from pathlib import Path
 from threading import Thread
-
+import argparse
 
 
 class PcapInfo:
-	def __init__(self, port, part):
-		self.set_pcap(port, part)
-		self.__filename = self.__built_file_name(self.__port, self.__part) 
-		if not Path(self.__filename).is_file():
-			raise FileNotFoundError()
-	def __built_file_name(self, port, part):
-		return PATH_PCAP + "pcapfiles/partition"+ part + "/port" + port + ".pcap"
-	def set_pcap(self, port, part):
+	def __init__(self, path, part, port=None):
+		self.set_path_pcap(path)
+		self.set_pcap(part, port)
+		
+	def __built_file_name(self, part, port):
+		if port == 'None':
+			filePath = self.__PATH_PCAP + "/pcapfiles/partition"+ part + "/"
+		else:		
+			filePath = self.__PATH_PCAP + "/pcapfiles/partition"+ part + "/port" + port + ".pcap"		
+		return filePath
+	
+	#set della partizione e porta
+	def set_pcap(self, part, port):
 		self.__port = str(port)
 		self.__part = str(part)
-
+		self.__filename = self.__built_file_name(self.__part, self.__port) 
+		if not Path(self.__filename).exists():
+			raise FileNotFoundError()
+	def get_param(self):
+		return self.part, self.port
+	#ritorna la stringa col nome del file
 	def get_filename(self):
 		return self.__filename
+	#set PATH_PCAP
+	def set_path_pcap(self, path):
+		self.__PATH_PCAP = path	#globale???
+	def is_dir():
+		return self.__port == 'None'
 
-PATH_PCAP = "/home/berna/"
+'''
+#testing PcapInfo:success
 try:
-	p = PcapInfo(81, 1)
+	p = PcapInfo("/home/berna/", 1, None)
 	print(p.get_filename())
 except FileNotFoundError:
 	print("File non trovato")
-
 '''
+
+
 	
 class Analyzer:
-	
-    def __init__(self, args):
-	self.__args = args
-	self.__part = 1	#PART=1
-#sig.signal(SIGALRM, analysis)
-	
-	if self.check_args() == False:
-	    self.usage(prog=str(sys.argv[0]))
+
+	def __init__(self, path_pcap, home_net=None, snort_conf='/etc/snort/snort.conf', log_dir = '.', ctf_name=None):
+		self.__PATH_PCAP = path_pcap
+		self.__CTF_NAME = ctf_name
+		self.__SNORT_CONF = snort_conf
+		self.__HOME_NET = home_net
+		self.__LOG_DIR = log_dir
+		self.__PART = 1
+		self.__PORT = None
 		
-	self.__PATH_PCAP = str(sys.argv[1])
-	self.__HOME_NET = str(sys.argv[2])
-	self.__CTF = str(sys.argv[3])
-	
-    def testing_config():
-	if Path(self.__PATH_PCAP).is_dir():
-		return 1
+	def testing_config(self):
+		if not Path(self.__PATH_PCAP).is_dir():
+			raise FileNotFoundError("PATH_PCAP")
 		
-	if Path(self.__PATH_PCAP+"/pcapfiles/").is_dir():
-		return 2
-	#print("If you insert wrong home net you can probably have problem with snort")
-	#print("you can modify this parameter in snort.conf file")
-	#print("CTF name is a parameter that snort will search for flags in packets")
-	#print("If you insert the wrong CTF name you can modify it in rules/local.rules file in $CTF")
-
-	try:
-	    portList=PATH_PCAP+"pcapfiles/portlist.conf"
-	    with open(portList, "r") as f:
-            tmp=f.read()
-            PORTS=(tmp.)
-	except:
-	    return 3
-	if args == "-f" :
-	    try:
-    	        with open("/etc/snort/snort.conf") as conf:
-                tmp = conf.read().replace("$CTF", CTF)
-                conf.write(tmp)
-	    except:
-    		#print("Snort Configuration file not found")
-    		#print("Quitting..")
-    		#sys.exit(1)
-		return 4
-	else:
-	    if not Path("/etc/snort/snort.conf").is_file():
-		return 4
+		if Path(self.__PATH_PCAP+"/pcapfiles/").is_dir():
+			raise FileNotFoundError("PcapFiles")
 	
-	#
-
-	#while true:
-
-	#print('Process terminated successfully')	
+		try:
+			portList=PATH_PCAP+"/pcapfiles/portlist.conf"
+			with open(portList, "r") as f:
+				lines=f.readlines()
+				'''
+				pl = False
+            			for line in lines:
+					if line.find("--port-list--"):
+						pl = True
+				if not pl:
+					raise NotPortlistFile()
+				for line in lines:
+					if not line.find("--port-list--"):
+						self.__PORT = line.split()
+				'''
+				for line in lines
+					self.__PORTS = line.split(';')
+					#print(self.__PORTS)	
+		except FileNotFoundError:
+			raise FileNotFoundError("portlist")
+	    			
+		if not self.__SNORT_CONF == '/etc/snort/snort.conf' :
+			#conf file custom messo
+			try:
+				
+				try:
+					cmd = ["snort", "-T", "-c", self.__SNORT_CONF]
+					subprocess.check_call(cmd)	#fai partire snort con il file custom
+				except subprocess.CalledProcessError:
+					raise SnortNotWellConfiguredError()
+	    		except FileNotFoundError:
+				raise FileNotFoundError("Custom config file Snort")
+		else
+			try:
+    	        		with open("/etc/snort/snort.conf") as conf:
+					lines = conf.readlines()
+					for l in lines:
+						
+                			tmp = conf.read().replace("$CTF", CTF)
+                			conf.write(tmp)
+				try:
+					cmd = ["snort", "-T", "-c", self.__SNORT_CONF]
+					subprocess.check_call(cmd)	#fai partire snort con il file custom
+				except subprocess.CalledProcessError:
+					raise SnortNotWellConfiguredError()
+	    		except FileNotFoundError:
+				raise FileNotFoundError("snort.conf")
 	
-    def __check_args():
-	if len(sys.argv) < 2:
-	    return 1
-    	if 
-	return 0
-    def __usage(prog):
-	print("%s file/to/find/pcapfiles home_net/mask [OPTIONS]" % (prog))
-        print("home_net must be the ip address of the net, e.g., 192.168.1.0/24")
-        sys.exit(1)
+	def rec_analysis():
 
-    def rec_analysis():
-	if isFolder(""):
-		return False
-	
-	for port in self.__ports: 
-	    try:
-		PcapInfo p = PcapInfo(port,self.__part)
-	        self.__analysis(p)
+		#controlla se ha tentato l'invio
+		try:
+			pcap = PcapInfo(self.__PCAP_PATH, self.__PART, None)
+		except FileNotFoundError:			
+			raise SkipAnalisisError()
+			return
 		
-	    except FileNotFoundException:
-		print("There is no pcap file with partition %d and port number %d" % ())
-	
-	self.__part += 1
-	return True
+		for port in self.__PORTS: 
+			try:
+				pcap.set_pcap(self.__PART, port)
+				self.__analysis(pcap)
+			except FileNotFoundException:
+				raise FileNotFoundException(self.__PART, port)
+ 		
+		self.__PART += 1
 	    
-    def req_analysis(port, part):
-	try:
-	    PcapInfo p = PcapInfo(port,self.__part)
-	    self.__analysis(p.get_pcapname())
-	except FileNotFoundException:
-	    print("There is no pcap file with partition %d and port number %d" % ())	
+	def req_analysis(part, port):
+		try:
+			p = PcapInfo(self.__PCAP_PATH, part, port)
+			if p.is_dir():
+				for porta in self.__ports:
+					p.set_pcap(part, porta)
+			    		self.__analysis(p)
+			else:
+				self.__analysis(p)
+		except FileNotFoundException:
+			raise RequestedAnalisisError(part, port)	
 
-    def __analysis(pcap):
-	os.system("snort -c /etc/snort/snort.conf -h {} -r {}".format(HOME_NET, pcapname))
-	
+	def __analysis(pcap):
+		part, port = pcap.get_param()
+		snort = ['snort', '-A', 'console', '-c', self.__SNORT_CONF, '-l', self.__LOG_DIR, '-r', p.get_filename()]
+		rename = ['mv', 'tcpdump.log.*', 'fpartition'+part+'/fport'+port+'.pcap']
+		if not self.__HOME_NET == None:
+			snort = snort.append(['-h', self.__HOME_NET])
+		try:
+			subprocess.check_call(snort)
+			subprocess.check_call(rename)
+		except subprocess.CalledProcessError:
+			if cmd == 'snort':
+				raise AnalysisError()
+			else if cmd == 'mv':
+				raise RenameError()
+
+
+
+'''
 class AnalizerThread(Thread):
     
     def __init__(self, args):
@@ -168,6 +212,12 @@ class AnalyzerThreadReq(AnalyzerThread):
     def run():
 	while not START_REC		
 	a.rev_analysis()
+
+
+#print("If you insert wrong home net you can probably have problem with snort")
+	#print("you can modify this parameter in snort.conf file")
+	#print("CTF name is a parameter that snort will search for flags in packets")
+	#print("If you insert the wrong CTF name you can modify it in rules/local.rules file in $CTF")
 
 class
 #main
