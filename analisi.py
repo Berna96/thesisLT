@@ -1,10 +1,10 @@
-import sys
+#import sys
 import os
-import signal as sig
+#import signal as sig
 from pathlib import Path
 from threading import Thread
 import argparse
-
+import subprocess
 
 class PcapInfo:
 	def __init__(self, path, part, port=None):
@@ -26,29 +26,42 @@ class PcapInfo:
 		if not Path(self.__filename).exists():
 			raise FileNotFoundError()
 	def get_param(self):
-		return self.part, self.port
+		return self.__part, self.__port
 	#ritorna la stringa col nome del file
 	def get_filename(self):
 		return self.__filename
 	#set PATH_PCAP
 	def set_path_pcap(self, path):
 		self.__PATH_PCAP = path	#globale???
-	def is_dir():
+	def is_dir(self):
 		return self.__port == 'None'
 
-'''
-#testing PcapInfo:success
-try:
-	p = PcapInfo("/home/berna/", 1, None)
-	print(p.get_filename())
-except FileNotFoundError:
-	print("File non trovato")
-'''
 
-
+class FilesNotFoundError(FileNotFoundError):
+	def __init__(self, name):
+		super().__init__()
+		self.__name = name
+	def get_name(self):
+		return self.name
+class Error(Exception):
+	pass
+class SnortNotWellConfiguredError(Error):
+	pass
+class AnalysisError(Error):
+	pass
+class RenameError(Error):
+	pass
+class SkipAnalisisError(Error):
+	pass
+class NotPortListFile(Error):
+	def __init__(self, path):
+		super().__init__()
+		self.err = "Whether the file {}/pcapfiles/portlist.conf has been modified or replaced".format(path)
 	
 class Analyzer:
-
+	'''
+	Analizzatore che testa Snort e che presenta metodi per l'analisi "richiesta" e "ricorsiva"
+	'''
 	def __init__(self, path_pcap, home_net=None, snort_conf='/etc/snort/snort.conf', log_dir = '.', ctf_name=None):
 		self.__PATH_PCAP = path_pcap
 		self.__CTF_NAME = ctf_name
@@ -59,61 +72,49 @@ class Analyzer:
 		self.__PORT = None
 		
 	def testing_config(self):
-		if not Path(self.__PATH_PCAP).is_dir():
-			raise FileNotFoundError("PATH_PCAP")
+		if not Path(self.__PATH_PCAP).exists():
+			raise FilesNotFoundError(self.__PATH_PCAP + ' folder')
+
+		if not Path(self.__PATH_PCAP+'/pcapfiles/').exists():
+			raise FilesNotFoundError('pcapfiles folder')
 		
-		if Path(self.__PATH_PCAP+"/pcapfiles/").is_dir():
-			raise FileNotFoundError("PcapFiles")
-	
 		try:
-			portList=PATH_PCAP+"/pcapfiles/portlist.conf"
+			portList=self.__PATH_PCAP+"/pcapfiles/portlist.conf"
 			with open(portList, "r") as f:
-				lines=f.readlines()
-				'''
-				pl = False
-            			for line in lines:
-					if line.find("--port-list--"):
-						pl = True
-				if not pl:
-					raise NotPortlistFile()
-				for line in lines:
-					if not line.find("--port-list--"):
-						self.__PORT = line.split()
-				'''
-				for line in lines
-					self.__PORTS = line.split(';')
+					lines=f.readlines()
+					for line in lines:
+						self.__PORTS = line.split(';')
+					self.__PORTS[-1] = self.__PORTS[-1].replace('\n', '')
+					#testing
+					#print(self.__PORTS)
+					#return
+					#check if portlist.conf was modified
+					for port in self.__PORTS:
+						if not port.isdigit():
+							raise NotPortListFile(self.__PATH_PCAP)
 					#print(self.__PORTS)	
 		except FileNotFoundError:
-			raise FileNotFoundError("portlist")
-	    			
-		if not self.__SNORT_CONF == '/etc/snort/snort.conf' :
-			#conf file custom messo
+			raise FilesNotFoundError("portlist.conf")
+		#sostituisco CTF con il nome della CTF
+		if not self.__CTF_NAME == None:
 			try:
-				
-				try:
-					cmd = ["snort", "-T", "-c", self.__SNORT_CONF]
-					subprocess.check_call(cmd)	#fai partire snort con il file custom
-				except subprocess.CalledProcessError:
-					raise SnortNotWellConfiguredError()
-	    		except FileNotFoundError:
-				raise FileNotFoundError("Custom config file Snort")
-		else
-			try:
-    	        		with open("/etc/snort/snort.conf") as conf:
-					lines = conf.readlines()
+				with open("/etc/snort/rules/local.rules") as f:
+					lines = f.readlines()
 					for l in lines:
-						
-                			tmp = conf.read().replace("$CTF", CTF)
-                			conf.write(tmp)
-				try:
-					cmd = ["snort", "-T", "-c", self.__SNORT_CONF]
-					subprocess.check_call(cmd)	#fai partire snort con il file custom
-				except subprocess.CalledProcessError:
-					raise SnortNotWellConfiguredError()
-	    		except FileNotFoundError:
-				raise FileNotFoundError("snort.conf")
-	
-	def rec_analysis():
+						f.write(l.replace("$CTF", self.__CTF_NAME))
+			except FileNotFoundError:
+				raise FilesNotFoundError("local.rules")		
+	    			
+		
+		try:
+			cmd = ["snort", "-T", "-c", self.__SNORT_CONF]
+			subprocess.check_call(cmd)
+		except subprocess.CalledProcessError:
+			raise SnortNotWellConfiguredError()
+		except FileNotFoundError:
+			raise FilesNotFoundError(self.__SNORT_CONF)
+			
+	def rec_analysis(self):
 
 		#controlla se ha tentato l'invio
 		try:
@@ -126,39 +127,74 @@ class Analyzer:
 			try:
 				pcap.set_pcap(self.__PART, port)
 				self.__analysis(pcap)
-			except FileNotFoundException:
-				raise FileNotFoundException(self.__PART, port)
+			except FileNotFoundError:
+				raise FilesNotFoundError(pcap.get_filename())
  		
 		self.__PART += 1
 	    
-	def req_analysis(part, port):
+	def req_analysis(self, part, port):
 		try:
-			p = PcapInfo(self.__PCAP_PATH, part, port)
+			p = PcapInfo(self.__PATH_PCAP, part, port)
 			if p.is_dir():
-				for porta in self.__ports:
-					p.set_pcap(part, porta)
-			    		self.__analysis(p)
+				for porta in self.__PORTS:
+					try:					
+						p.set_pcap(part, porta)
+						self.__analysis(p)
+					except FileNotFoundError:
+						raise FilesNotFoundError(pcap.get_filename())
 			else:
 				self.__analysis(p)
-		except FileNotFoundException:
-			raise RequestedAnalisisError(part, port)	
+		except FileNotFoundError:
+			raise FilesNotFoundError(pcap.get_filename())
 
-	def __analysis(pcap):
+	def __analysis(self, pcap):
+		pwd = os.getcwd()
 		part, port = pcap.get_param()
-		snort = ['snort', '-A', 'console', '-c', self.__SNORT_CONF, '-l', self.__LOG_DIR, '-r', p.get_filename()]
-		rename = ['mv', 'tcpdump.log.*', 'fpartition'+part+'/fport'+port+'.pcap']
+		snort = ['snort', '-q', '-A', 'fast', '-c', self.__SNORT_CONF, '-l', self.__LOG_DIR, '-r', pcap.get_filename()]
+		mkdir = ['mkdir', self.__LOG_DIR+'/fpartition'+part+'/']
+		rename1 = ['cp', self.__LOG_DIR+'/alert', self.__LOG_DIR+'/fpartition'+part+'/aport'+port]
+		remove1 = ['rm', self.__LOG_DIR+'/alert']
+		rename2 = 'cp '+self.__LOG_DIR+'/tcpdump.log.* '+self.__LOG_DIR+'/fpartition'+part+'/fport'+port+'.pcap'
+		remove2 = 'rm '+self.__LOG_DIR+'/tcpdump.log.*'
 		if not self.__HOME_NET == None:
 			snort = snort.append(['-h', self.__HOME_NET])
 		try:
 			subprocess.check_call(snort)
-			subprocess.check_call(rename)
-		except subprocess.CalledProcessError:
-			if cmd == 'snort':
+			#print("Snort finished conifig")
+			try:
+				subprocess.check_call(mkdir)
+			except subprocess.CalledProcessError:
+				pass
+			try:
+				subprocess.check_call(rename1)
+				subprocess.check_call(remove1)
+			except subprocess.CalledProcessError:
+				pass
+			try:
+				subprocess.check_call(rename2, shell = True)
+				subprocess.check_call(remove2, shell = True)
+			except subprocess.CalledProcessError:
+				pass
+			
+			#subprocess.check_call(rename1)
+			#subprocess.check_call(remove1)
+			#subprocess.check_call(rename2, shell = True)
+			#subprocess.check_call(remove2, shell = True)
+			
+		except subprocess.CalledProcessError as e:
+			if e.cmd == 'snort':
 				raise AnalysisError()
-			else if cmd == 'mv':
+			elif e.cmd == 'mv':
 				raise RenameError()
 
+'''test Analyzer()'''
+a = Analyzer('/home/berna/', log_dir = os.getcwd()+'/testing-analisi/')
+try:
+	a.testing_config()
+except FilesNotFoundError:
+	print('pcapfiles not found')
 
+a.req_analysis(1,8000)
 
 '''
 class AnalizerThread(Thread):
@@ -263,8 +299,6 @@ ff
 		while not START_REC		
 		a.rev_analysis()
     '''
- 
-
 
 
 
