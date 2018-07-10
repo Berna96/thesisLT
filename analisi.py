@@ -97,15 +97,28 @@ class Analyzer:
 			raise FilesNotFoundError("portlist.conf")
 		#sostituisco CTF con il nome della CTF
 		if not self.__CTF_NAME == None:
-			try:
-				with open("/etc/snort/rules/local.rules") as f:
+			if Path(self.__PATH_PCAP+'pcapfiles/.ctfname').exists():
+				with open(self.__PATH_PCAP+'pcapfiles/.ctfname', 'r') as f:
+					ctf_name = f.read()
+					ctf_name = ctf_name.replace('\n', '')
+			else:
+					ctf_name = "$CTF"
+				
+		try:
+			with open("/etc/snort/rules/local.rules", "r+") as f:
 					lines = f.readlines()
+					lines2 = []
 					for l in lines:
-						f.write(l.replace("$CTF", self.__CTF_NAME))
-			except FileNotFoundError:
-				raise FilesNotFoundError("local.rules")		
+						l=l.replace(ctf_name, self.__CTF_NAME)
+						lines2.append(l)
+					f.seek(0)
+					f.writelines(lines2)
+		except FileNotFoundError:
+				raise FilesNotFoundError("local.rules")	
+		with open(self.__PATH_PCAP+'pcapfiles/.ctfname','w') as f:
+			f.write(self.__CTF_NAME)	
 	    			
-		
+
 		try:
 			cmd = ["snort", "-T", "-c", self.__SNORT_CONF]
 			subprocess.check_call(cmd)
@@ -118,7 +131,7 @@ class Analyzer:
 
 		#controlla se ha tentato l'invio
 		try:
-			pcap = PcapInfo(self.__PCAP_PATH, self.__PART, None)
+			pcap = PcapInfo(self.__PATH_PCAP, self.__PART, None)
 		except FileNotFoundError:			
 			raise SkipAnalisisError()
 			return
@@ -157,7 +170,7 @@ class Analyzer:
 		rename2 = 'cp '+self.__LOG_DIR+'/tcpdump.log.* '+self.__LOG_DIR+'/fpartition'+part+'/fport'+port+'.pcap'
 		remove2 = 'rm '+self.__LOG_DIR+'/tcpdump.log.*'
 		if not self.__HOME_NET == None:
-			snort = snort.append(['-h', self.__HOME_NET])
+			snort.extend(['-h', self.__HOME_NET])
 		try:
 			subprocess.check_call(snort)
 			#print("Snort finished conifig")
@@ -182,20 +195,19 @@ class Analyzer:
 			#subprocess.check_call(remove2, shell = True)
 			
 		except subprocess.CalledProcessError as e:
-			if e.cmd == 'snort':
 				raise AnalysisError()
-			elif e.cmd == 'mv':
-				raise RenameError()
-
-'''test Analyzer()'''
-a = Analyzer('/home/berna/', log_dir = os.getcwd()+'/testing-analisi/')
+			
+'''test Analyzer()
+a = Analyzer('/home/berna/', log_dir = os.getcwd()+'/testing-analisi/', home_net = '192.168.1.0/24', ctf_name = 'IlPippodelleMadonne')
 try:
 	a.testing_config()
 except FilesNotFoundError:
 	print('pcapfiles not found')
 
-a.req_analysis(1,8000)
-
+#a.req_analysis(1,80)
+a.rec_analysis()
+a.rec_analysis()
+'''
 '''
 class AnalizerThread(Thread):
     
