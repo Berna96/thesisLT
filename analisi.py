@@ -1,321 +1,285 @@
-#import sys
+from analyzer import *
+from threading import *
+import queue
+import sys
 import os
-#import signal as sig
-from pathlib import Path
-from threading import Thread
-import argparse
-import subprocess
+import _thread
 
-class PcapInfo:
-	def __init__(self, path, part, port=None):
-		self.set_path_pcap(path)
-		self.set_pcap(part, port)
-		
-	def __built_file_name(self, part, port):
-		if port == 'None':
-			filePath = self.__PATH_PCAP + "/pcapfiles/partition"+ part + "/"
-		else:		
-			filePath = self.__PATH_PCAP + "/pcapfiles/partition"+ part + "/port" + port + ".pcap"		
-		return filePath
-	
-	#set della partizione e porta
-	def set_pcap(self, part, port):
-		self.__port = str(port)
-		self.__part = str(part)
-		self.__filename = self.__built_file_name(self.__part, self.__port) 
-		if not Path(self.__filename).exists():
-			raise FileNotFoundError()
-	def get_param(self):
-		return self.__part, self.__port
-	#ritorna la stringa col nome del file
-	def get_filename(self):
-		return self.__filename
-	#set PATH_PCAP
-	def set_path_pcap(self, path):
-		self.__PATH_PCAP = path	#globale???
-	def is_dir(self):
-		return self.__port == 'None'
+import tkinter as tk
+from tkinter import filedialog as fd
+from tkinter import messagebox as msg
+import argparse as ap
+import time
+
+def eprint(*args, **kwargs):
+	print(*args, file=sys.stderr, **kwargs)
 
 
-class FilesNotFoundError(FileNotFoundError):
-	def __init__(self, name):
-		super().__init__()
-		self.__name = name
-	def get_name(self):
-		return self.name
-class Error(Exception):
-	pass
-class SnortNotWellConfiguredError(Error):
-	pass
-class AnalysisError(Error):
-	pass
-class RenameError(Error):
-	pass
-class SkipAnalisisError(Error):
-	pass
-class NotPortListFile(Error):
-	def __init__(self, path):
-		super().__init__()
-		self.err = "Whether the file {}/pcapfiles/portlist.conf has been modified or replaced".format(path)
-	
-class Analyzer:
-	'''
-	Analizzatore che testa Snort e che presenta metodi per l'analisi "richiesta" e "ricorsiva"
-	'''
-	def __init__(self, path_pcap, home_net=None, snort_conf='/etc/snort/snort.conf', log_dir = '.', ctf_name=None):
+class Parser:
+	# home_net, snort_conf, log_dir, ctf_name = optional_args
+	def __init__(self):
+		self.__path_pcap = None
+		parser = ap.ArgumentParser(description='Analyzer program of pcaps with Snort')
+		parser.add_argument('path_pcap', type=str, help='folder of pcapfiles')
+		parser.add_argument('-o', dest='home_net', help='If you insert wrong home net you can probably have problem with snort\r\nyou can modify this parameter in snort.conf file', default=None)
+		parser.add_argument('-c', dest='snort_conf', help='Snort configuration file (default: /etc/snort/snort.conf)', default='/etc/snort/snort.conf')
+		parser.add_argument('-l', dest='log_dir', help='Log folder (default: current directory)', default='.')	
+		parser.add_argument('-d', dest='ctf_name', help='CTF name to search for flags', default=None)
+		args = parser.parse_args()
+		self.__path_pcap = args.path_pcap
+		self.__opt_args = [args.home_net, args.snort_conf, args.log_dir, args.ctf_name]
+
+	def get_arguments(self):
+		return self.__path_pcap, self.__opt_args	
+
+class Gui:
+
+	def __init__(self,title_name, path_pcap, log_dir):
 		self.__PATH_PCAP = path_pcap
-		self.__CTF_NAME = ctf_name
-		self.__SNORT_CONF = snort_conf
-		self.__HOME_NET = home_net
 		self.__LOG_DIR = log_dir
-		self.__PART = 1
-		self.__PORT = None
+		self.__title = title_name
+		#gui objects
+		self.__WIN = tk.Tk()
+		self.__WIN.title(title_name)
+		self.__WIN.rowconfigure(0, weight=1)
+		self.__WIN.rowconfigure(6, weight=1)
+		self.__WIN.columnconfigure(0, weight=1)
+		self.__WIN.columnconfigure(6, weight=1)
+		#widget
+		tk.Label(self.__WIN, text='Partition:').grid(row = 0, column = 1, sticky='w')
+		self.__partTXT = tk.Entry(self.__WIN)
+		self.__partTXT.grid(row = 0, column = 2)
+		tk.Label(self.__WIN, text='Port number:').grid(row = 0, column = 3)
+		self.__portTXT = tk.Entry(self.__WIN)
+		self.__portTXT.grid(row = 0, column = 4)
 		
-	def testing_config(self):
-		if not Path(self.__PATH_PCAP).exists():
-			raise FilesNotFoundError(self.__PATH_PCAP + ' folder')
+		reqButton = tk.Button(text="Request", command=self.__request)
+		reqButton.grid(row=0, column=5)
 
-		if not Path(self.__PATH_PCAP+'/pcapfiles/').exists():
-			raise FilesNotFoundError('pcapfiles folder')
+		self.__TXT = tk.Text(self.__WIN)
+		self.__TXT.grid(row = 1, sticky='nsew', column = 1, columnspan = 5)
 		
-		try:
-			portList=self.__PATH_PCAP+"/pcapfiles/portlist.conf"
-			with open(portList, "r") as f:
-					lines=f.readlines()
-					for line in lines:
-						self.__PORTS = line.split(';')
-					self.__PORTS[-1] = self.__PORTS[-1].replace('\n', '')
-					#testing
-					#print(self.__PORTS)
-					#return
-					#check if portlist.conf was modified
-					for port in self.__PORTS:
-						if not port.isdigit():
-							raise NotPortListFile(self.__PATH_PCAP)
-					#print(self.__PORTS)	
-		except FileNotFoundError:
-			raise FilesNotFoundError("portlist.conf")
-		#sostituisco CTF con il nome della CTF
-		if not self.__CTF_NAME == None:
-			if Path(self.__PATH_PCAP+'pcapfiles/.ctfname').exists():
-				with open(self.__PATH_PCAP+'pcapfiles/.ctfname', 'r') as f:
-					ctf_name = f.read()
-					ctf_name = ctf_name.replace('\n', '')
-			else:
-					ctf_name = "$CTF"
-				
-		try:
-			with open("/etc/snort/rules/local.rules", "r+") as f:
-					lines = f.readlines()
-					lines2 = []
-					for l in lines:
-						l=l.replace(ctf_name, self.__CTF_NAME)
-						lines2.append(l)
-					f.seek(0)
-					f.writelines(lines2)
-		except FileNotFoundError:
-				raise FilesNotFoundError("local.rules")	
-		with open(self.__PATH_PCAP+'pcapfiles/.ctfname','w') as f:
-			f.write(self.__CTF_NAME)	
-	    			
+		mb = tk.Menu(self.__WIN)
+		self.__WIN.config(menu=mb)
+		fm = tk.Menu(mb)
+		fm.add_command(label='Open...', command=self.__do_open)
+		fm.add_separator()
+		fm.add_command(label='Quit', command=self.__do_quit)
+		mb.add_cascade(label='File', menu=fm)
+		self.__WIN.geometry("640x420")
+		tk.mainloop()
 
-		try:
-			cmd = ["snort", "-T", "-c", self.__SNORT_CONF]
-			subprocess.check_call(cmd)
-		except subprocess.CalledProcessError:
-			raise SnortNotWellConfiguredError()
-		except FileNotFoundError:
-			raise FilesNotFoundError(self.__SNORT_CONF)
-			
-	def rec_analysis(self):
+	def __do_quit(self):
+		ans=msg.askyesno("Quit", "Are you sure you want to quit?")
+		if ans == True:
+			self.__WIN.quit()
+			os._exit(0)
 
-		#controlla se ha tentato l'invio
-		try:
-			pcap = PcapInfo(self.__PATH_PCAP, self.__PART, None)
-		except FileNotFoundError:			
-			raise SkipAnalisisError()
+	def __request(self):
+		part = self.__partTXT.get().replace('\n', '')
+		port = self.__portTXT.get().replace('\n', '')
+		#print('partition: ',part, '; port: ',port)
+		if part == '':
+			msg.showerror('Error', 'You must insert almost the partition number')
+			return
+		if not part.isdigit():
+			msg.showerror('Error', 'In partition field you must insert a number!')
+			self.__partTXT.delete( 0, 'end')
 			return
 		
-		for port in self.__PORTS: 
+		if not port == '':
+	
+			if not port.isdigit():
+				msg.showerror('Error', 'In port field you must insert a number!')
+				self.__portTXT.delete( 0, 'end')
+				return
+			global PORTS
+			if not port in PORTS:
+				msg.showerror('Error', 'You have insered a port not present in the list!')
+				self.__portTXT.delete( 0, 'end')
+				return
+			path = self.__LOG_DIR+'/fpartition'+part+'/fport'+port+'.pcap'
+			flag = True
+
+		else:
+			path = self.__LOG_DIR+'/fpartition'+part+'/'
+			flag = False
+			
+		if flag:
+			tcpdump = ['tcpdump', '-A', '-r', path]
+			if Path(path).exists():
+				try:
+					out = subprocess.check_output(tcpdump)
+				except subprocess.CalledProcessError:
+					msg.showerror('Error', 'Error calling tcpdump')
+				else:
+					self.__TXT.delete('1.0', 'end')
+					self.__TXT.insert('1.0', out)
+					self.__WIN.title(path)
+				finally:
+					return
+		else:
+			port = None
+		
+		q.put([part, port])
+		req.wait()
+		global OK
+		if not OK:
+			OK = False
+			return 
+		tcpdump = ['tcpdump', '-A', '-r', path]
+		if port is not None:
 			try:
-				pcap.set_pcap(self.__PART, port)
-				self.__analysis(pcap)
-			except FileNotFoundError:
-				raise FilesNotFoundError(pcap.get_filename())
- 		
-		self.__PART += 1
-	    
-	def req_analysis(self, part, port):
-		try:
-			p = PcapInfo(self.__PATH_PCAP, part, port)
-			if p.is_dir():
-				for porta in self.__PORTS:
-					try:					
-						p.set_pcap(part, porta)
-						self.__analysis(p)
-					except FileNotFoundError:
-						raise FilesNotFoundError(pcap.get_filename())
+				out = subprocess.check_output(tcpdump)
+			except subprocess.CalledProcessError:
+				msg.showerror('Error', 'Error calling tcpdump')
 			else:
-				self.__analysis(p)
-		except FileNotFoundError:
-			raise FilesNotFoundError(pcap.get_filename())
+				self.__TXT.delete('1.0', 'end')
+				self.__TXT.insert('1.0', out)
+				self.__WIN.title(path)
+			finally:
+				return	
+		
+	def __do_open(self):
+		path = fd.askopenfilename(title='Scegli un file pcap da aprire', filetypes=[("packet capture", "*.pcap")])
+		if len(path) > 0:
+			self.__TXT.delete('1.0', 'end')
+			tcpdump = ['tcpdump', '-A','-r', path]
+			try:
+				out = subprocess.check_output(tcpdump)
+			except subprocess.CalledProcessError:
+				msg.showerror('Error', 'Error calling tcpdump')
+			else:
+				self.__TXT.insert('1.0', out)
+				self.__WIN.title(path)
 
-	def __analysis(self, pcap):
-		pwd = os.getcwd()
-		part, port = pcap.get_param()
-		snort = ['snort', '-q', '-A', 'fast', '-c', self.__SNORT_CONF, '-l', self.__LOG_DIR, '-r', pcap.get_filename()]
-		mkdir = ['mkdir', self.__LOG_DIR+'/fpartition'+part+'/']
-		rename1 = ['cp', self.__LOG_DIR+'/alert', self.__LOG_DIR+'/fpartition'+part+'/aport'+port]
-		remove1 = ['rm', self.__LOG_DIR+'/alert']
-		rename2 = 'cp '+self.__LOG_DIR+'/tcpdump.log.* '+self.__LOG_DIR+'/fpartition'+part+'/fport'+port+'.pcap'
-		remove2 = 'rm '+self.__LOG_DIR+'/tcpdump.log.*'
-		if not self.__HOME_NET == None:
-			snort.extend(['-h', self.__HOME_NET])
-		try:
-			subprocess.check_call(snort)
-			#print("Snort finished conifig")
-			try:
-				subprocess.check_call(mkdir)
-			except subprocess.CalledProcessError:
-				pass
-			try:
-				subprocess.check_call(rename1)
-				subprocess.check_call(remove1)
-			except subprocess.CalledProcessError:
-				pass
-			try:
-				subprocess.check_call(rename2, shell = True)
-				subprocess.check_call(remove2, shell = True)
-			except subprocess.CalledProcessError:
-				pass
-			
-			#subprocess.check_call(rename1)
-			#subprocess.check_call(remove1)
-			#subprocess.check_call(rename2, shell = True)
-			#subprocess.check_call(remove2, shell = True)
-			
-		except subprocess.CalledProcessError as e:
-				raise AnalysisError()
-			
-'''test Analyzer()
-a = Analyzer('/home/berna/', log_dir = os.getcwd()+'/testing-analisi/', home_net = '192.168.1.0/24', ctf_name = 'IlPippodelleMadonne')
-try:
-	a.testing_config()
-except FilesNotFoundError:
-	print('pcapfiles not found')
 
-#a.req_analysis(1,80)
-a.rec_analysis()
-a.rec_analysis()
-'''
-'''
-class AnalizerThread(Thread):
-    
-    def __init__(self, args):
-	super().__init__()
-	self.__args = args	
-    abstract def run() 
-  
-class AnalizerThreadRec(AnalizerThread):
+#classe generale thread analizzatore
+class AnalyzerThread(Thread):
+	
+	def __init__(self, path_pcap, optional_args):
+		super().__init__() 
+		self.a = Analyzer(path_pcap, optional_args)
+
+	def run(self):
+		pass
+
+#thread ricorsivo
+class AnalyzerThreadRec(AnalyzerThread):
     #to be execute in thread/process
+	def __init__(self, path_pcap, optional_args):
+		super().__init__(path_pcap, optional_args)
 	
-    def __init__(self, args):
-	super().__init__(args)
-	
-    def run():
-	try:
-		Analizer a = Analizer(self.__args)
-	except WrongArgumentException():
-		sys.exit(1)
-	
-	switcher = {
-		1:__invalid_path,
-		2:__invalid_path_pcap,
-		3:
-		4:
-		}
-		print_stuff=switcher.get(a.testing_config())
-		self.print_stuff()
-		#global REQ_START
-		REQ_START = True
-		a.rec_analisis()
-		
-		sig.signal(SIGALRM, a.rec_analysis)
-		sig.alarm(5*60)
-    def __invalid_path(self):
-	print("Path not valid")
-    	print("Quitting..")
-    	sys.exit(1)
-    def __invalid_path_pcap(self):
-	print("Path not valid, pcap files not found")
-    	print("Quitting..")
-    	sys.exit(1)
-    def __check_port_list
-	
+	def run(self):
+		#raise KeyboardInterrupt()
+		try:
+			self.a.testing_config()
+		except FilesNotFoundError as fnfe:
+			print('File not found: {}'.format(fnfe.get_name()))
+			os._exit(1)
+		except SnortNotWellConfiguredError:
+			print('Something failed with Snort configuration: check the configuration file chosen and retry')
+			os._exit(2)
+		except NotPortListFileError as e:
+			print(e.msg)
+			os._exit(3)
+		else:
+			global PORTS
+			PORTS = self.a.get_ports()
+			ev.set()	#fa partire gli altri thread
+		#ricorsivo
+		curr_time = time.time()
+		while True:
+			if abs(time.time()-curr_time)>=300:	#300 secondi
+				print('Start recursive analysis')
+				ev.clear()
+				try:	
+					self.a.rec_analysis()
+				except SkipAnalisisError:
+					print('Skipped recursive analysis')
+				except FileNotFoundError:
+					print('At least one files does not exist. Other files has been processed')
+				except NoRulesFindError:
+					print('Snort has not generated at least tcpdump.log file: snort rules have not found any exploit or flag')
+				except AnalysisError as e:
+					eprint(e.msg)
+				ev.set()
+				curr_time = time.time()
+		#sig.signal(SIGALRM, a.rec_analysis)
+		#sig.alarm(5*60)
 
+#thread richiesta
 class AnalyzerThreadReq(AnalyzerThread):
-    def __init__(self, args):
-	super().__init__(args)	#super(args)
-
-    def run():
-	while not START_REC		
-	a.rev_analysis()
-
-
-#print("If you insert wrong home net you can probably have problem with snort")
-	#print("you can modify this parameter in snort.conf file")
-	#print("CTF name is a parameter that snort will search for flags in packets")
-	#print("If you insert the wrong CTF name you can modify it in rules/local.rules file in $CTF")
-
-class
-#main
-
-START_REC = False
-ff
-
-
-
-
-'''
-'''
-    def __init__(self, typethread, args):
-	Thread.__init__(self)
-	self.__args
-	if not (typethread == "rec" or typethread == "req"):
-		raise WTFEXception()
-	self.__type = typethread
 	
-    def run(self):
+	def __init__(self, path_pcap, optional_args):
+		super().__init__(path_pcap, optional_args)
 	
-	try:
-		Analizer a = Analizer(self.__args)
-	except WrongArgumentException():
-		sys.exit(1)
-	if self.__type == "rec":
-			
-		switcher = {
-			1:__invalid_path,
-			2:__invalid_path_pcap,
-			3
-			4:
-		}
-		print_stuff=switcher.get(a.testing_config())
-		self.print_stuff()
-		global REQ_START
-		REQ_START = True
-		a.rec_analisis()
+	def run(self):
+		#raise KeyboardInterrupt()
+		ev.wait()
+		#request
+		self.a.set_ports(PORTS)
+		while True:
+			ev.wait()
+			req.clear()
+			item = q.get()
+			print('Got request partition {} and port {}'.format(item[0], item[1]))
+			try:
+				self.a.req_analysis(item[0], item[1])
+			except FilesNotFoundError as fnfe:
+				print('File not found: {}; Skipped request analysis'.format(fnfe.get_name()))
+			except FileNotFoundError:
+				print('At least one file has not been founded')
+			except AnalysisError as e:
+				eprint(e.msg)
+			except NoRulesFindError:
+				print('Snort has not generated at least a tcpdump.log file: snort rules has not found any exploit or flag')
+			else:
+				global OK
+				OK=True
+			finally:
+				req.set()
+
+class GUIThread(Thread):
+	
+	def __init__(self, pcap_path, log_dir):
+		super().__init__()
+		self.__PATH_PCAP = pcap_path
+		self.__LOG_DIR = log_dir
+
+	def run(self):
+		#raise KeyboardInterrupt()
+		ev.wait()	
+		Gui('Analysis Pcap', self.__PATH_PCAP, self.__LOG_DIR)
 		
-		sig.signal(SIGALRM, a.rec_analysis)
-		sig.alarm(5*60)
-	else if self.__type == "rev":
-		while not START_REC		
-		a.rev_analysis()
-    '''
 
+#main
+ev = Event()
+ev.clear()
+req = Event()
+req.clear()
+q = queue.Queue()
+PORTS = []
+OK = False
+#parser
+parser = Parser()
+path_pcap, opt_args = parser.get_arguments()
+print(path_pcap)
+print(opt_args)
 
+recursive = AnalyzerThreadRec(path_pcap, opt_args)
+request = AnalyzerThreadReq(path_pcap, opt_args)
+gui = GUIThread(path_pcap, opt_args[2])
 
+try:	
+	recursive.start()
+	request.start()
+	gui.start()
+	recursive.join()
+	request.join()
+	gui.join()
+except KeyboardInterrupt:
+	pass
 
-
-
-
-
+print('Process Terminated Successfully')
+os._exit(0)
