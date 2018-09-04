@@ -203,10 +203,10 @@ class Analyzer:
 	def __analysis(self, pcap):
 		pwd = os.getcwd()
 		part, port = pcap.get_param()
-		snort = ['snort', '-q', '-A', 'fast', '-c', self.__SNORT_CONF, '-l', self.__LOG_DIR, '-r', pcap.get_filename()]
+		snort = ['snort', '-q', '-A', 'console', '-c', self.__SNORT_CONF, '-l', self.__LOG_DIR, '-r', pcap.get_filename()]
 		#mkdir = ['mkdir', self.__LOG_DIR+'/fpartition'+part+'/']
-		rename1 = ['cp', self.__LOG_DIR+'/alert', self.__LOG_DIR+'/fpartition'+part+'/aport'+port]
-		remove1 = ['rm', self.__LOG_DIR+'/alert']
+		#rename1 = ['cp', self.__LOG_DIR+'/alert', self.__LOG_DIR+'/fpartition'+part+'/aport'+port]
+		#remove1 = ['rm', self.__LOG_DIR+'/alert']
 		rename2 = 'cp '+self.__LOG_DIR+'/tcpdump.log.* '+self.__LOG_DIR+'/fpartition'+part+'/fport'+port+'.pcap'
 		remove2 = 'rm '+self.__LOG_DIR+'/tcpdump.log.*'
 		if not self.__HOME_NET == None:
@@ -219,14 +219,16 @@ class Analyzer:
 		directory = Path(self.__LOG_DIR+'/fpartition'+part+'/')
 		if not directory.exists():
 			directory.mkdir(parents=True, exist_ok=True)
+		'''		
 		try:
 			subprocess.check_call(rename1)
 			subprocess.check_call(remove1)
 		except subprocess.CalledProcessError:
 			pass
+		'''
 		try:
-			subprocess.check_call(rename2, shell = True)
-			subprocess.check_call(remove2, shell = True)
+			subprocess.check_call(rename2, shell = True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+			subprocess.check_call(remove2, shell = True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 		except subprocess.CalledProcessError:
 			raise NoRulesFindError()	
 		
