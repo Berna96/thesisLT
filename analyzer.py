@@ -23,6 +23,8 @@ class PcapInfo:
 		self.__port = str(port)
 		self.__part = str(part)
 		self.__filename = self.__built_file_name(self.__part, self.__port) 
+	
+	def exists(self):
 		if not Path(self.__filename).exists():
 			raise FileNotFoundError()
 	def get_param(self):
@@ -42,7 +44,7 @@ class FilesNotFoundError(FileNotFoundError):
 		super().__init__()
 		self.__name = name
 	def get_name(self):
-		return self.name
+		return self.__name
 class Error(Exception):
 	pass
 class SnortNotWellConfiguredError(Error):
@@ -144,6 +146,7 @@ class Analyzer:
 		#controlla se ha tentato l'invio
 		try:
 			pcap = PcapInfo(self.__PATH_PCAP, self.__PART, None)
+			pcap.exists()
 		except FileNotFoundError:			
 			raise SkipAnalisisError()
 		
@@ -170,6 +173,7 @@ class Analyzer:
 	def req_analysis(self, part, port):
 		try:
 			p = PcapInfo(self.__PATH_PCAP, part, port)
+			p.exists()
 		except FileNotFoundError:
 			raise FilesNotFoundError(p.get_filename())
 			
@@ -203,10 +207,10 @@ class Analyzer:
 	def __analysis(self, pcap):
 		pwd = os.getcwd()
 		part, port = pcap.get_param()
-		snort = ['snort', '-q', '-A', 'fast', '-c', self.__SNORT_CONF, '-l', self.__LOG_DIR, '-r', pcap.get_filename()]
+		snort = ['snort', '-q', '-A', 'console', '-c', self.__SNORT_CONF, '-l', self.__LOG_DIR, '-r', pcap.get_filename()]
 		#mkdir = ['mkdir', self.__LOG_DIR+'/fpartition'+part+'/']
-		rename1 = ['cp', self.__LOG_DIR+'/alert', self.__LOG_DIR+'/fpartition'+part+'/aport'+port]
-		remove1 = ['rm', self.__LOG_DIR+'/alert']
+		#rename1 = ['cp', self.__LOG_DIR+'/alert', self.__LOG_DIR+'/fpartition'+part+'/aport'+port]
+		#remove1 = ['rm', self.__LOG_DIR+'/alert']
 		rename2 = 'cp '+self.__LOG_DIR+'/tcpdump.log.* '+self.__LOG_DIR+'/fpartition'+part+'/fport'+port+'.pcap'
 		remove2 = 'rm '+self.__LOG_DIR+'/tcpdump.log.*'
 		if not self.__HOME_NET == None:
@@ -219,14 +223,16 @@ class Analyzer:
 		directory = Path(self.__LOG_DIR+'/fpartition'+part+'/')
 		if not directory.exists():
 			directory.mkdir(parents=True, exist_ok=True)
+		'''		
 		try:
 			subprocess.check_call(rename1)
 			subprocess.check_call(remove1)
 		except subprocess.CalledProcessError:
 			pass
+		'''
 		try:
-			subprocess.check_call(rename2, shell = True)
-			subprocess.check_call(remove2, shell = True)
+			subprocess.check_call(rename2, shell = True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+			subprocess.check_call(remove2, shell = True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 		except subprocess.CalledProcessError:
 			raise NoRulesFindError()	
 		
