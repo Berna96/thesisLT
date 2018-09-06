@@ -23,6 +23,8 @@ class PcapInfo:
 		self.__port = str(port)
 		self.__part = str(part)
 		self.__filename = self.__built_file_name(self.__part, self.__port) 
+	
+	def exists(self):
 		if not Path(self.__filename).exists():
 			raise FileNotFoundError()
 	def get_param(self):
@@ -42,7 +44,7 @@ class FilesNotFoundError(FileNotFoundError):
 		super().__init__()
 		self.__name = name
 	def get_name(self):
-		return self.name
+		return self.__name
 class Error(Exception):
 	pass
 class SnortNotWellConfiguredError(Error):
@@ -144,6 +146,7 @@ class Analyzer:
 		#controlla se ha tentato l'invio
 		try:
 			pcap = PcapInfo(self.__PATH_PCAP, self.__PART, None)
+			pcap.exists()
 		except FileNotFoundError:			
 			raise SkipAnalisisError()
 		
@@ -170,6 +173,7 @@ class Analyzer:
 	def req_analysis(self, part, port):
 		try:
 			p = PcapInfo(self.__PATH_PCAP, part, port)
+			p.exists()
 		except FileNotFoundError:
 			raise FilesNotFoundError(p.get_filename())
 			
